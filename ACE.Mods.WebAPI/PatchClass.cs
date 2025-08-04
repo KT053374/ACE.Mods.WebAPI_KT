@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace ACE.Mods.WebAPI;
 
 [HarmonyPatch]
@@ -11,6 +13,9 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     private IServerHost? serverHost;
     private Task? serverTask;
+    private readonly SemaphoreSlim serviceLock = new(1, 1);
+
+    private void LoadSettings() => Settings = SettingsContainer?.Settings ?? new();
 
     public override void Init()
     {
@@ -19,8 +24,8 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     public override async Task OnStartSuccess()
     {
-        Settings = SettingsContainer?.Settings ?? new();
-       await StartServicesAsync();
+        LoadSettings();
+        await StartServicesAsync();
     }
 
     //public override Task OnWorldOpen()
@@ -44,7 +49,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         }
 
         await base.SettingsChanged(sender, e);
-        Settings = SettingsContainer?.Settings ?? new();
+        LoadSettings();
 
         try
         {
@@ -65,6 +70,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     public async Task StartServicesAsync()
     {
+        await serviceLock.WaitAsync();
         try
         {
             // ensure an existing server isn't already running
@@ -76,7 +82,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
             if (serverHost != null || serverTask != null)
             {
-                await StopServicesAsync();
+                await StopServicesInternalAsync();
             }
 
             //var content = Content.From(Resource.FromString("Hello World!"));
@@ -146,6 +152,8 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             if (!System.Net.IPAddress.TryParse(Settings.Host, out var host))
             {
                 Mod.Log($"Invalid host address '{Settings.Host}'", ModManager.LogLevel.Error);
+                serverHost?.Dispose();
+                serverHost = null;
                 return;
             }
 
@@ -156,20 +164,9 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             if (Settings.OutputToConsole)
                 serverHost?.Console();
 
-            // Start the server without awaiting so the method returns immediately
             serverTask = serverHost!.StartAsync();
             
-            serverTask.ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                {
-                    Mod.Log($"API Server terminated: {t.Exception?.GetBaseException().Message}", ModManager.LogLevel.Error);
-                }
-                else
-                {
-                    Mod.Log("API Server task completed");
-                }
-            }, TaskScheduler.Default);
+            _ = MonitorServerAsync(serverTask);
             
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
 
@@ -179,9 +176,26 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             Mod.Log($"ERROR during initialization - {ex.Message}", ModManager.LogLevel.Error);
             throw;
         }
+        finally
+        {
+            serviceLock.Release();
+        }
     }
 
     public async Task StopServicesAsync()
+    {
+        await serviceLock.WaitAsync();
+        try
+        {
+            await StopServicesInternalAsync();
+        }
+        finally
+        {
+            serviceLock.Release();
+        }
+    }
+
+    private async Task StopServicesInternalAsync()
     {
         try
         {
@@ -215,6 +229,19 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             serverHost?.Dispose();
             serverHost = null;
             Mod.Log("API Server Offline");
+        }
+    }
+
+    private async Task MonitorServerAsync(Task task)
+    {
+        try
+        {
+            await task;
+            Mod.Log("API Server task completed");
+        }
+        catch (Exception ex)
+        {
+            Mod.Log($"API Server terminated: {ex.GetBaseException().Message}", ModManager.LogLevel.Error);
         }
     }
 
