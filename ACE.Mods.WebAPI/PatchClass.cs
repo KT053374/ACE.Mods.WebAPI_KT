@@ -71,6 +71,9 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     public async Task StartServicesAsync(CancellationToken cancellationToken = default)
     {
+        if (disposed)
+            throw new ObjectDisposedException(nameof(PatchClass));
+            
         await serviceLock.WaitAsync(cancellationToken);
         try
         {
@@ -175,6 +178,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         catch (Exception ex)
         {
             Mod.Log($"ERROR during initialization - {ex.Message}", ModManager.LogLevel.Error);
+            await StopServicesInternalAsync(cancellationToken);
             throw;
         }
         finally
@@ -185,6 +189,9 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     public async Task StopServicesAsync(CancellationToken cancellationToken = default)
     {
+         if (disposed)
+            throw new ObjectDisposedException(nameof(PatchClass));
+
         await serviceLock.WaitAsync(cancellationToken);
         try
         {
@@ -239,6 +246,10 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         {
             await task.WaitAsync(cancellationToken);
             Mod.Log("API Server task completed");
+        }
+        catch (OperationCanceledException)
+        {
+            Mod.Log("API Server monitoring canceled");
         }
         catch (Exception ex)
         {
