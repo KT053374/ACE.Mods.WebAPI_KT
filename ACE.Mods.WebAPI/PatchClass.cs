@@ -121,8 +121,9 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             if (Settings.OutputToConsole)
                 serverHost?.Console();
 
-            // Start the server without awaiting so it runs in the background.
-            serverTask = serverHost?.StartAsync();
+            // Start the server and wait for startup to complete.
+            serverTask = serverHost!.StartAsync();
+            await serverTask;
             
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
 
