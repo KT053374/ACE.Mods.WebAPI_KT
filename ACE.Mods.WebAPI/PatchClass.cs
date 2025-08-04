@@ -67,6 +67,18 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
     {
         try
         {
+            // ensure an existing server isn't already running
+            if (serverTask != null && !serverTask.IsCompleted)
+            {
+                Mod.Log("API Server is already running");
+                return;
+            }
+
+            if (serverHost != null || serverTask != null)
+            {
+                await StopServicesAsync();
+            }
+
             //var content = Content.From(Resource.FromString("Hello World!"));
 
             //var server = Host.Create()
@@ -131,7 +143,12 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
             serverHost?.Defaults();
 
-            var host = System.Net.IPAddress.Parse(Settings.Host);
+            if (!System.Net.IPAddress.TryParse(Settings.Host, out var host))
+            {
+                Mod.Log($"Invalid host address '{Settings.Host}'", ModManager.LogLevel.Error);
+                return;
+            }
+
             var port = Settings.Port;
 
             serverHost?.Bind(host, port);
@@ -139,9 +156,20 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             if (Settings.OutputToConsole)
                 serverHost?.Console();
 
-            // Start the server and wait for startup to complete.
+            // Start the server without awaiting so the method returns immediately
             serverTask = serverHost!.StartAsync();
-            await serverTask;
+            
+            serverTask.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    Mod.Log($"API Server terminated: {t.Exception?.GetBaseException().Message}", ModManager.LogLevel.Error);
+                }
+                else
+                {
+                    Mod.Log("API Server task completed");
+                }
+            }, TaskScheduler.Default);
             
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
 
