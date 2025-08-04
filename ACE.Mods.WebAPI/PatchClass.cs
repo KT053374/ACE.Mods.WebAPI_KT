@@ -3,7 +3,7 @@ using System.Threading;
 namespace ACE.Mods.WebAPI;
 
 [HarmonyPatch]
-public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : BasicPatch<Settings>(mod, settingsName)
+public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : BasicPatch<Settings>(mod, settingsName), IAsyncDisposable
 {
     //private static readonly JsonSerializerOptions jsonSerializerOptions = new()
     //{
@@ -14,7 +14,8 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
     private IServerHost? serverHost;
     private Task? serverTask;
     private readonly SemaphoreSlim serviceLock = new(1, 1);
-
+    private bool disposed;
+    
     private void LoadSettings() => Settings = SettingsContainer?.Settings ?? new();
 
     public override void Init()
@@ -64,13 +65,13 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     public override async Task Stop()
     {
-        await StopServicesAsync();
+        await DisposeAsync();
         await base.Stop();
     }
 
-    public async Task StartServicesAsync()
+    public async Task StartServicesAsync(CancellationToken cancellationToken = default)
     {
-        await serviceLock.WaitAsync();
+        await serviceLock.WaitAsync(cancellationToken);
         try
         {
             // ensure an existing server isn't already running
@@ -82,7 +83,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
             if (serverHost != null || serverTask != null)
             {
-                await StopServicesInternalAsync();
+                await StopServicesInternalAsync(cancellationToken);
             }
 
             //var content = Content.From(Resource.FromString("Hello World!"));
@@ -166,7 +167,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
             serverTask = serverHost!.StartAsync();
             
-            _ = MonitorServerAsync(serverTask);
+            _ = MonitorServerAsync(serverTask, cancellationToken);
             
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
 
@@ -182,12 +183,12 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         }
     }
 
-    public async Task StopServicesAsync()
+    public async Task StopServicesAsync(CancellationToken cancellationToken = default)
     {
-        await serviceLock.WaitAsync();
+        await serviceLock.WaitAsync(cancellationToken);
         try
         {
-            await StopServicesInternalAsync();
+            await StopServicesInternalAsync(cancellationToken);
         }
         finally
         {
@@ -195,7 +196,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         }
     }
 
-    private async Task StopServicesInternalAsync()
+    private async Task StopServicesInternalAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -208,7 +209,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             {
                 try
                 {
-                    await serverTask;
+                    await serverTask.WaitAsync(cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -232,17 +233,30 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         }
     }
 
-    private async Task MonitorServerAsync(Task task)
+    private async Task MonitorServerAsync(Task task, CancellationToken cancellationToken = default)
     {
         try
         {
-            await task;
+            await task.WaitAsync(cancellationToken);
             Mod.Log("API Server task completed");
         }
         catch (Exception ex)
         {
             Mod.Log($"API Server terminated: {ex.GetBaseException().Message}", ModManager.LogLevel.Error);
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        await StopServicesAsync();
+        serviceLock.Dispose();
     }
 
     static ValueTask<IUser?> AuthenticateRequestAsync(IRequest request, string apiKey)
