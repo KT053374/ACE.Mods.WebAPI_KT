@@ -31,12 +31,30 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
     //    return Task.CompletedTask;
     //}
 
-    protected override async void SettingsChanged(object? sender, EventArgs e)
+    protected override async Task SettingsChanged(object? sender, EventArgs e)
     {
-        await StopServicesAsync();
-        base.SettingsChanged(sender, e);
+        try
+        {
+            await StopServicesAsync();
+        }
+        catch (Exception ex)
+        {
+            Mod.Log($"ERROR stopping services - {ex.Message}", ModManager.LogLevel.Error);
+            throw;
+        }
+
+        await base.SettingsChanged(sender, e);
         Settings = SettingsContainer?.Settings ?? new();
-        await StartServicesAsync();
+
+        try
+        {
+            await StartServicesAsync();
+        }
+        catch (Exception ex)
+        {
+            Mod.Log($"ERROR starting services - {ex.Message}", ModManager.LogLevel.Error);
+            throw;
+        }
     }
 
     public override async Task Stop()
