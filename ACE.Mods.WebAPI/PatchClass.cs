@@ -10,43 +10,42 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
     //};
 
     private IServerHost? serverHost;
+    private Task? serverTask;
 
     public override void Init()
     {
         base.Init();
     }
 
-    public override Task OnStartSuccess()
+    public override async Task OnStartSuccess()
     {
         Settings = SettingsContainer?.Settings ?? new();
-        StartServices();
-
-        return Task.CompletedTask;
+       await StartServiceAsync();
     }
 
     //public override Task OnWorldOpen()
     //{
     //    Settings = SettingsContainer?.Settings ?? new();
-    //    StartServices();
+    //    await StartServicesAsync();
 
     //    return Task.CompletedTask;
     //}
 
-    protected override void SettingsChanged(object? sender, EventArgs e)
+    protected override async void SettingsChanged(object? sender, EventArgs e)
     {
-        StopServices();
+        await StopServicesAsync();
         base.SettingsChanged(sender, e);
         Settings = SettingsContainer?.Settings ?? new();
-        StartServices();
+        await StartServicesAsync();
     }
 
-    public override void Stop()
+    public override async Task Stop()
     {
-        StopServices();
-        base.Stop();
+        await StopServicesAsync();
+        await base.Stop();
     }
 
-    public void StartServices()
+    public async Task StartServicesAsync()
     {
         try
         {
@@ -122,7 +121,12 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             if (Settings.OutputToConsole)
                 serverHost?.Console();
 
-            var server = serverHost?.StartAsync();
+            serverTask = serverHost?.StartAsync();
+            
+            if (serverTask != null)
+            {
+                await serverTask;
+            }
 
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
 
@@ -130,16 +134,35 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         catch (Exception ex)
         {
             Mod.Log($"ERROR during initialization - {ex.Message}", ModManager.LogLevel.Error);
+            throw;
         }
     }
 
-    public void StopServices()
+    public async Task StopServicesAsync()
     {
-        serverHost?.StopAsync();
+        try
+        {
+            if (serverTask != null)
+            {
+                await serverTask;
+                serverTask = null;
+            }
 
-        serverHost = null;
-
-        Mod.Log("API Server Offline");
+            if (serverHost != null)
+            {
+                await serverHost.StopAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Mod.Log($"ERROR during shutdown - {ex.Message}", ModManager.LogLevel.Error);
+        }
+        finally
+        {
+            serverHost?.Dispose();
+            serverHost = null;
+            Mod.Log("API Server Offline");
+        }
     }
 
     static ValueTask<IUser?> AuthenticateRequestAsync(IRequest request, string apiKey)
