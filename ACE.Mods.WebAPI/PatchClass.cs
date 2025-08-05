@@ -179,7 +179,14 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         catch (Exception ex)
         {
             Mod.Log($"ERROR during initialization - {ex.Message}", ModManager.LogLevel.Error);
-            await StopServicesInternalAsync(cancellationToken);
+            try
+            {
+                await StopServicesInternalAsync(cancellationToken);
+            }
+            catch (Exception stopEx)
+            {
+                Mod.Log($"ERROR stopping services during initialization - {stopEx.Message}", ModManager.LogLevel.Error);
+            }
             throw;
         }
         finally
@@ -197,6 +204,11 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         try
         {
             await StopServicesInternalAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Mod.Log($"ERROR stopping services - {ex.Message}", ModManager.LogLevel.Error);
+            throw;
         }
         finally
         {
@@ -222,6 +234,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
                 catch (Exception ex)
                 {
                     Mod.Log($"ERROR during server execution - {ex.Message}", ModManager.LogLevel.Error);
+                    throw;
                 }
                 finally
                 {
@@ -237,6 +250,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
                 catch (Exception ex)
                 {
                     Mod.Log($"ERROR during server monitoring - {ex.Message}", ModManager.LogLevel.Error);
+                    throw;
                 }
                 finally
                 {
@@ -279,11 +293,20 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         {
             return;
         }
-
-        
-        await StopServicesAsync();
-        serviceLock.Dispose();
-        disposed = true;
+        try
+        {
+            await StopServicesAsync();
+        }
+        catch (Exception ex)
+        {
+            Mod.Log($"ERROR during disposal - {ex.Message}", ModManager.LogLevel.Error);
+            throw;
+        }
+        finally
+        {
+            serviceLock.Dispose();
+            disposed = true;
+        }
     }
 
     static ValueTask<IUser?> AuthenticateRequestAsync(IRequest request, string apiKey)
