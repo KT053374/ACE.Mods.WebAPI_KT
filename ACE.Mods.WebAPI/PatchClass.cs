@@ -13,6 +13,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
     private IServerHost? serverHost;
     private Task? serverTask;
+    private Task? monitorTask;
     private readonly SemaphoreSlim serviceLock = new(1, 1);
     private bool disposed;
     
@@ -158,7 +159,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
                 Mod.Log($"Invalid host address '{Settings.Host}'", ModManager.LogLevel.Error);
                 serverHost?.Dispose();
                 serverHost = null;
-                return;
+                throw new FormatException($"Invalid host address '{Settings.Host}'");
             }
 
             var port = Settings.Port;
@@ -170,7 +171,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
             serverTask = serverHost!.StartAsync();
             
-            _ = MonitorServerAsync(serverTask, cancellationToken);
+            monitorTask = MonitorServerAsync(serverTask, cancellationToken);
             
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
 
@@ -227,6 +228,21 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
                     serverTask = null;
                 }
             }
+            if (monitorTask != null)
+            {
+                try
+                {
+                    await monitorTask;
+                }
+                catch (Exception ex)
+                {
+                    Mod.Log($"ERROR during server monitoring - {ex.Message}", ModManager.LogLevel.Error);
+                }
+                finally
+                {
+                    monitorTask = null;
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -264,10 +280,10 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
             return;
         }
 
-        disposed = true;
-
+        
         await StopServicesAsync();
         serviceLock.Dispose();
+        disposed = true;
     }
 
     static ValueTask<IUser?> AuthenticateRequestAsync(IRequest request, string apiKey)
