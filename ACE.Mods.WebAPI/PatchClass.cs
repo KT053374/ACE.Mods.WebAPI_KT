@@ -19,11 +19,6 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
     
     private void LoadSettings() => Settings = SettingsContainer?.Settings ?? new();
 
-    public override void Init()
-    {
-        base.Init();
-    }
-
     public override async Task OnStartSuccess()
     {
         LoadSettings();
@@ -171,6 +166,12 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
 
             serverTask = serverHost!.StartAsync();
             
+            await Task.WhenAny(serverTask, Task.Delay(500, cancellationToken));
+            if (serverTask.IsFaulted)
+            {
+                await serverTask;
+            }
+
             monitorTask = MonitorServerAsync(serverTask, cancellationToken);
             
             Mod.Log($"API Server Online and listening to requests at http://{host}:{port}");
@@ -222,7 +223,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         {
             if (serverHost != null)
             {
-                await serverHost.StopAsync();
+                await serverHost.StopAsync(cancellationToken);
             }
 
             if (serverTask != null)
@@ -261,6 +262,7 @@ public class PatchClass(BasicMod mod, string settingsName = "Settings.json") : B
         catch (Exception ex)
         {
             Mod.Log($"ERROR during shutdown - {ex.Message}", ModManager.LogLevel.Error);
+            throw;
         }
         finally
         {
